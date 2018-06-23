@@ -22,16 +22,19 @@ type node struct {
 	ctx     context.Context
 	uaddr   *net.UDPAddr
 	doneUDP chan bool
+	id      uint16
 }
 
 func main() {
 	var (
 		ip = flag.String("ip", "", "node ip")
+		id = flag.Int("id", 0, "node id")
 	)
 	flag.Parse()
 	n := &node{}
+	n.id = uint16(*id)
 	// run this for 120 seconds
-	n.ctx, _ = context.WithDeadline(context.Background(), time.Now().Add(5*time.Second))
+	n.ctx = context.TODO()
 	uaddr, err := net.ResolveUDPAddr(UDPVersion, MulticastAddr)
 	if err != nil {
 		log.Fatalf("invalid udp addr: %s", err)
@@ -72,7 +75,7 @@ func (n *node) listen(tconn *net.TCPConn) {
 	for {
 		select {
 		case <-ticker.C:
-			b, err := qsy.NewPacket(qsy.KeepAliveT, uint16(1), "", uint32(0), uint16(1), false, false).Encode()
+			b, err := qsy.NewPacket(qsy.KeepAliveT, n.id, "", uint32(0), uint16(1), false, false).Encode()
 			if err != nil {
 				log.Printf("failed to encode packet, closing conn: %s", err)
 				tconn.Close()
@@ -103,7 +106,7 @@ func (n *node) advertiseUDP() {
 	for {
 		select {
 		case <-ticker.C:
-			b, err := qsy.NewPacket(qsy.HelloT, uint16(1), "", uint32(0), uint16(1), false, false).Encode()
+			b, err := qsy.NewPacket(qsy.HelloT, n.id, "", uint32(0), uint16(1), false, false).Encode()
 			if err != nil {
 				log.Printf("failed to encode packet: %s", err)
 				break
