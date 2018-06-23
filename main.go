@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net"
 	"time"
@@ -17,23 +18,19 @@ const (
 )
 
 type node struct {
+	ctx     context.Context
 	uaddr   *net.UDPAddr
-	ticker  *time.Ticker
 	doneUDP chan bool
-	i       *net.Interface
 }
 
 func main() {
 	n := &node{}
+	// run this for 120 seconds
+	n.ctx, _ = context.WithDeadline(context.Background(), time.Now().Add(5*time.Second))
 	uaddr, err := net.ResolveUDPAddr(UDPVersion, MulticastAddr)
 	if err != nil {
 		log.Fatalf("invalid udp addr: %s", err)
 	}
-	i, err := net.InterfaceByName("en0")
-	if err != nil {
-		log.Fatalf("invalid network interface: %s", err)
-	}
-	n.i = i
 	n.uaddr = uaddr
 	n.doneUDP = make(chan bool, 1)
 	go n.advertiseUDP()
@@ -46,45 +43,76 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to announce on local TCP network: %s", err)
 	}
-	for {
-		tconn, err := ln.Accept()
-		if err != nil {
-			log.Fatalf("failed to accept tcp connection: %s", err)
-		}
-		n.doneUDP <- true
+
+	go func() {
 		for {
+			tconn, err := ln.AcceptTCP()
+			if err != nil {
+				log.Printf("failed to accept tcp connection: %s", err)
+				continue
+			}
+			n.doneUDP <- true
+			// listen blocks until connection is closed
+			// or context is done.
+			n.listen(tconn)
+			go n.advertiseUDP()
+		}
+	}()
+	<-n.ctx.Done()
+	ln.Close()
+}
+
+func (n *node) listen(tconn *net.TCPConn) {
+	ticker := time.NewTicker(KeepAlivePeriod * time.Millisecond)
+	for {
+		select {
+		case <-ticker.C:
 			b, err := qsy.NewPacket(qsy.KeepAliveT, uint16(1), "", uint32(0), uint16(1), false, false).Encode()
 			if err != nil {
 				log.Printf("failed to encode packet, closing conn: %s", err)
 				tconn.Close()
 				break
 			}
-			tconn.Write(b)
+			if _, err := tconn.Write(b); err != nil {
+				log.Printf("failed to write tconn: %v", err)
+				tconn.Close()
+				ticker.Stop()
+				return
+			}
 			log.Printf("sent keep alive packet")
-			time.Sleep(KeepAlivePeriod * time.Millisecond)
+		case <-n.ctx.Done():
+			log.Printf("closing tconn")
+			tconn.Close()
+			ticker.Stop()
+			return
 		}
-		go n.advertiseUDP()
 	}
 }
 
 func (n *node) advertiseUDP() {
-	c, err := net.ListenMulticastUDP("udp4", n.i, n.uaddr)
+	c, err := net.DialUDP(UDPVersion, nil, n.uaddr)
 	if err != nil {
 		log.Fatalf("failed to listen UDP: %v", err)
 	}
-	n.ticker = time.NewTicker(HelloPeriod * time.Millisecond)
+	ticker := time.NewTicker(HelloPeriod * time.Millisecond)
 	for {
 		select {
-		case <-n.ticker.C:
+		case <-ticker.C:
 			b, err := qsy.NewPacket(qsy.HelloT, uint16(1), "", uint32(0), uint16(1), false, false).Encode()
 			if err != nil {
 				log.Printf("failed to encode packet: %s", err)
 				break
 			}
-			c.WriteTo(b, n.uaddr)
+			c.Write(b)
 			log.Printf("sent hello packet")
 		case <-n.doneUDP:
-			n.ticker.Stop()
+			ticker.Stop()
+			c.Close()
+			return
+		case <-n.ctx.Done():
+			log.Printf("closing udp conn")
+			ticker.Stop()
+			c.Close()
 			return
 		}
 	}
