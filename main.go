@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log"
 	"net"
 	"time"
@@ -24,6 +25,10 @@ type node struct {
 }
 
 func main() {
+	var (
+		ip = flag.String("ip", "", "node ip")
+	)
+	flag.Parse()
 	n := &node{}
 	// run this for 120 seconds
 	n.ctx, _ = context.WithDeadline(context.Background(), time.Now().Add(5*time.Second))
@@ -35,7 +40,7 @@ func main() {
 	n.doneUDP = make(chan bool, 1)
 	go n.advertiseUDP()
 
-	laddr, err := net.ResolveTCPAddr(TCPVersion, "10.0.0.2:3000")
+	laddr, err := net.ResolveTCPAddr(TCPVersion, net.JoinHostPort(*ip, "3000"))
 	if err != nil {
 		log.Fatalf("invalid tcp addr: %v", err)
 	}
