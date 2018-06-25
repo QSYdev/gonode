@@ -75,7 +75,7 @@ func (n *node) listen(tconn *net.TCPConn) {
 	for {
 		select {
 		case <-ticker.C:
-			b, err := qsy.NewPacket(qsy.KeepAliveT, n.id, "", uint32(0), uint16(1), false, false).Encode()
+			b, err := qsy.NewPacket(qsy.KeepAliveT, n.id, qsy.NoColor, uint32(0), uint16(1), false, false).Encode()
 			if err != nil {
 				log.Printf("failed to encode packet, closing conn: %s", err)
 				tconn.Close()
@@ -106,7 +106,7 @@ func (n *node) advertiseUDP() {
 	for {
 		select {
 		case <-ticker.C:
-			b, err := qsy.NewPacket(qsy.HelloT, n.id, "", uint32(0), uint16(1), false, false).Encode()
+			b, err := qsy.NewPacket(qsy.HelloT, n.id, qsy.NoColor, uint32(0), uint16(1), false, false).Encode()
 			if err != nil {
 				log.Printf("failed to encode packet: %s", err)
 				break
